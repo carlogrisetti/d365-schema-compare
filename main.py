@@ -2,6 +2,7 @@ import yaml
 import adal
 import time
 import json
+import pandas as pd
 from d365api import Client
 
 CONFIG_FILEPATH = 'config.yaml'
@@ -129,16 +130,25 @@ def main():
     print(f"==> It took {time_taken:.1f}s to retrieve {len(result['value'])} items")
 
     entity_definitions = result['value']
+    entity_fields = []
     for entity in entity_definitions:
         entity_logical_name = entity['LogicalName']
         entity_attributes = entity['Attributes']
         for attribute in entity_attributes:
-            print(attribute)
-            #($select=ColumnNumber;LogicalName;AttributeType;MaxLength)
+            attribute = dict(attribute)  # sanitize object type
+            column_number = attribute.get('ColumnNumber')
+            logical_name = attribute.get('LogicalName')
+            attribute_type = attribute.get('AttributeType')
+            max_length = attribute.get('MaxLength')
+            entity_fields += [[entity_logical_name, column_number, logical_name, attribute_type, max_length]]
+            print(f"Entity {entity_logical_name} - Column {column_number}: {logical_name} - {attribute_type}({max_length})")
 
-    with open('entity_definitions.json', 'w', encoding='utf-8') as f:
-        json.dump(entity_definitions, f, ensure_ascii=False, indent=4)
+    df = pd.DataFrame.from_records(data=entity_fields, columns=['EntityName', 'ColumnNumber', 'ColumnName', 'ColumnType', 'ColumnLength'])
 
+    #with open('entity_definitions.json', 'w', encoding='utf-8') as f:
+    #    json.dump(entity_definitions, f, ensure_ascii=False, indent=4)
+
+    df.to_csv(path_or_buf='entity_fields.csv', index=False)
     print("==> Done!")
 
 
