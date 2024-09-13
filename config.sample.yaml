@@ -1,0 +1,5 @@
+environment:
+  tenant_id: 'cf1c97c7-f1a5-413b-81a4-98e100a7b44a'                       # Tenant ID for your Azure Subscription
+  client_id: '60ea8bc9-e617-4e52-aa8e-6aca52a1bfe3'                       # Your Service Principal App ID
+  client_secret: 'kar7Q~RN~ZZc1U-1mBCbabaEKnJe7EFfYBRZ.'                  # Your Service Principal Password
+  client_url: 'https://my-environment-url.crm4.dynamics.com'     # Dynamics 365 base URL
