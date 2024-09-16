@@ -1,3 +1,4 @@
+import os
 import yaml
 import adal
 import time
@@ -6,6 +7,9 @@ import pandas as pd
 from d365api import Client
 
 CONFIG_FILEPATH = 'config.yaml'
+RESULTS_PATH = 'results'
+CLEAN_RESULTS = False
+VERBOSE = False
 
 
 class ClientManager:
@@ -97,59 +101,101 @@ def get_entity_definitions(client_manager: ClientManager):
     return result, time_taken
 
 
-def main():
+def load_config() -> dict:
 
     # region Config
+    # Let's start by stating some obvious facts
+    print(f"==> Configuration file: {CONFIG_FILEPATH}")
+
     with open(CONFIG_FILEPATH) as config_file:
         config = yaml.load(config_file, Loader=yaml.FullLoader)
 
-        if 'environment' in config:
-            tenant_id = config['environment']['tenant_id']
-            client_url = config['environment']['client_url']
-            client_id = config['environment']['client_id']
-            client_secret = config['environment']['client_secret']
+        if 'environments' in config:
+            for environment in config['environments']:
+                print(f"==> Environment configuration found: {environment}")
         else:
-            raise SyntaxError("Configuration incorrect")
+            raise SyntaxError("==> Configuration incorrect. Missing 'environments' key.")
+
+        if 'baseline' in config:
+            if config['baseline'] in config['environments']:
+                print(f"==> Using {config['baseline']} as baseline")
+            else:
+                raise ValueError(f"==> Baseline environment {config['baseline']} is not in the configured environments.")
+        else:
+            raise SyntaxError("==> Configuration incorrect. Missing 'baseline' key.")
+
+    # Clear or create results folder
+    if os.path.isdir(RESULTS_PATH):
+        if CLEAN_RESULTS:
+            print(f"==> Clearing '{RESULTS_PATH}' folder")
+            for file in os.listdir(RESULTS_PATH):
+                os.remove(os.path.join(RESULTS_PATH, file))
+    else:
+        print(f"==> Creating '{RESULTS_PATH}' folder")
+        os.mkdir(RESULTS_PATH)
     # endregion
 
-    # Let's start by stating some obvious facts
-    print(f"Configuration file: {CONFIG_FILEPATH}")
+    return config
 
-    # Logging in to the system
-    print("==> Authenticating on Dynamics 365...")
-    client_manager = ClientManager(
-        tenant_id=tenant_id,
-        client_url=client_url,
-        client_id=client_id,
-        client_secret=client_secret
-    )
 
-    # Getting entity structure
-    print("==> Retrieving Entity Definitions...")
-    result, time_taken = get_entity_definitions(client_manager=client_manager)
-    print(f"==> It took {time_taken:.1f}s to retrieve {len(result['value'])} items")
+def get_metadata(config: dict) -> None:
+    for environment_name in config['environments']:
+        environment_config = config['environments'][environment_name]
+        print(f"==> ({environment_name}) Started working on environment")
 
-    entity_definitions = result['value']
-    entity_fields = []
-    for entity in entity_definitions:
-        entity_logical_name = entity['LogicalName']
-        entity_attributes = entity['Attributes']
-        for attribute in entity_attributes:
-            attribute = dict(attribute)  # sanitize object type
-            column_number = attribute.get('ColumnNumber')
-            logical_name = attribute.get('LogicalName')
-            attribute_type = attribute.get('AttributeType')
-            max_length = attribute.get('MaxLength')
-            entity_fields += [[entity_logical_name, column_number, logical_name, attribute_type, max_length]]
-            print(f"Entity {entity_logical_name} - Column {column_number}: {logical_name} - {attribute_type}({max_length})")
+        # Loading environment configuration
+        tenant_id = environment_config['tenant_id']
+        client_url = environment_config['client_url']
+        client_id = environment_config['client_id']
+        client_secret = environment_config['client_secret']
 
-    df = pd.DataFrame.from_records(data=entity_fields, columns=['EntityName', 'ColumnNumber', 'ColumnName', 'ColumnType', 'ColumnLength'])
+        # Logging in to the system
+        print(f"==> ({environment_name}) Authenticating on Dynamics 365...")
+        client_manager = ClientManager(
+            tenant_id=tenant_id,
+            client_url=client_url,
+            client_id=client_id,
+            client_secret=client_secret
+        )
 
-    #with open('entity_definitions.json', 'w', encoding='utf-8') as f:
-    #    json.dump(entity_definitions, f, ensure_ascii=False, indent=4)
+        # Getting entity structure
+        print(f"==> ({environment_name}) Retrieving entity definitions...")
+        result, time_taken = get_entity_definitions(client_manager=client_manager)
+        print(f"==> ({environment_name}) It took {time_taken:.1f}s to retrieve {len(result['value'])} items")
 
-    df.to_csv(path_or_buf='entity_fields.csv', index=False)
-    print("==> Done!")
+        entity_definitions = result['value']
+        entity_fields = []
+        for entity in entity_definitions:
+            entity_logical_name = entity['LogicalName']
+            entity_attributes = entity['Attributes']
+            for attribute in entity_attributes:
+                attribute = dict(attribute)  # sanitize object type
+                column_number = attribute.get('ColumnNumber')
+                logical_name = attribute.get('LogicalName')
+                attribute_type = attribute.get('AttributeType')
+                max_length = attribute.get('MaxLength')
+                entity_fields += [[entity_logical_name, column_number, logical_name, attribute_type, max_length]]
+                if VERBOSE:
+                    print(f"Entity {entity_logical_name} - Column {column_number}: {logical_name} - {attribute_type}({max_length})")
+
+        df = pd.DataFrame.from_records(data=entity_fields, columns=['EntityName', 'ColumnNumber', 'ColumnName', 'ColumnType', 'ColumnLength'])
+        environment_output = os.path.join(RESULTS_PATH, f"entity_fields_{environment_name}.csv")
+        df.to_csv(path_or_buf=environment_output, index=False)
+
+        print(f"==> ({environment_name}) Done!")
+
+    return
+
+
+def compare_environments(config: dict):
+    # TODO: implement this
+    return
+
+
+def main():
+    config = load_config()
+    get_metadata(config=config)
+    compare_environments(config=config)
 
 
 if __name__ == '__main__':
