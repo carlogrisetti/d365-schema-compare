@@ -7,8 +7,8 @@ from d365api import Client
 
 CONFIG_FILEPATH = 'config.yaml'
 RESULTS_PATH = 'results'
-CLEAN_RESULTS = False
-VERBOSE = False
+CLEAN_RESULTS = True  # Empties the RESULTS_PATH folder, starting each time with a clean slate
+VERBOSE = False  # Just shows some verbose info about fields collected
 
 
 class ClientManager:
@@ -169,15 +169,14 @@ def get_metadata(config: dict) -> None:
             entity_attributes = entity['Attributes']
             for attribute in entity_attributes:
                 attribute = dict(attribute)  # sanitize object type
-                column_number = int(attribute.get('ColumnNumber'))
                 logical_name = attribute.get('LogicalName')
                 attribute_type = attribute.get('AttributeType')
-                max_length = int(attribute.get('MaxLength'))
-                entity_fields += [[entity_logical_name, column_number, logical_name, attribute_type, max_length]]
+                max_length = attribute.get('MaxLength')
+                entity_fields += [[entity_logical_name, logical_name, attribute_type, max_length]]
                 if VERBOSE:
-                    print(f"Entity {entity_logical_name} - Column {column_number}: {logical_name} - {attribute_type}({max_length})")
+                    print(f"Entity {entity_logical_name}: {logical_name} - {attribute_type}({max_length})")
 
-        df = pd.DataFrame.from_records(data=entity_fields, columns=['EntityName', 'ColumnNumber', 'ColumnName', 'ColumnType', 'ColumnLength'])
+        df = pd.DataFrame.from_records(data=entity_fields, columns=['EntityName', 'ColumnName', 'ColumnType', 'ColumnLength'])
         environment_output = os.path.join(RESULTS_PATH, f"entity_fields_{environment_name}.csv")
         df.to_csv(path_or_buf=environment_output, index=False)
 
@@ -192,7 +191,6 @@ def compare_environments(config: dict) -> None:
     baseline_name = config['baseline']
     baseline_input = os.path.join(RESULTS_PATH, f"entity_fields_{baseline_name}.csv")
     baseline_df = pd.read_csv(filepath_or_buffer=baseline_input)
-    baseline_df.drop(labels=['ColumnNumber'], axis=1, inplace=True)
     baseline_df.sort_values(by=['EntityName', 'ColumnName'], ignore_index=True, inplace=True)
 
     # ... with all the environments, except for itself, of course.
@@ -200,7 +198,6 @@ def compare_environments(config: dict) -> None:
         print(f"==> Comparing {environment_name} to {baseline_name} ")
         environment_input = os.path.join(RESULTS_PATH, f"entity_fields_{environment_name}.csv")
         environment_df = pd.read_csv(filepath_or_buffer=environment_input)
-        environment_df.drop(labels=['ColumnNumber'], axis=1, inplace=True)
         environment_df.sort_values(by=['EntityName', 'ColumnName'], ignore_index=True, inplace=True)
 
         # Calculate merged dataframe and export it to .CSV
