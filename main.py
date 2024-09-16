@@ -2,7 +2,6 @@ import os
 import yaml
 import adal
 import time
-import json
 import pandas as pd
 from d365api import Client
 
@@ -170,10 +169,10 @@ def get_metadata(config: dict) -> None:
             entity_attributes = entity['Attributes']
             for attribute in entity_attributes:
                 attribute = dict(attribute)  # sanitize object type
-                column_number = attribute.get('ColumnNumber')
+                column_number = int(attribute.get('ColumnNumber'))
                 logical_name = attribute.get('LogicalName')
                 attribute_type = attribute.get('AttributeType')
-                max_length = attribute.get('MaxLength')
+                max_length = int(attribute.get('MaxLength'))
                 entity_fields += [[entity_logical_name, column_number, logical_name, attribute_type, max_length]]
                 if VERBOSE:
                     print(f"Entity {entity_logical_name} - Column {column_number}: {logical_name} - {attribute_type}({max_length})")
@@ -187,8 +186,76 @@ def get_metadata(config: dict) -> None:
     return
 
 
-def compare_environments(config: dict):
-    # TODO: implement this
+def compare_environments(config: dict) -> None:
+
+    # We want to compare the baseline environment...
+    baseline_name = config['baseline']
+    baseline_input = os.path.join(RESULTS_PATH, f"entity_fields_{baseline_name}.csv")
+    baseline_df = pd.read_csv(filepath_or_buffer=baseline_input)
+    baseline_df.drop(labels=['ColumnNumber'], axis=1, inplace=True)
+    baseline_df.sort_values(by=['EntityName', 'ColumnName'], ignore_index=True, inplace=True)
+
+    # ... with all the environments, except for itself, of course.
+    for environment_name in [env for env in config['environments'] if env != baseline_name]:
+        print(f"==> Comparing {environment_name} to {baseline_name} ")
+        environment_input = os.path.join(RESULTS_PATH, f"entity_fields_{environment_name}.csv")
+        environment_df = pd.read_csv(filepath_or_buffer=environment_input)
+        environment_df.drop(labels=['ColumnNumber'], axis=1, inplace=True)
+        environment_df.sort_values(by=['EntityName', 'ColumnName'], ignore_index=True, inplace=True)
+
+        # Calculate merged dataframe and export it to .CSV
+        merged_df = environment_df.merge(right=baseline_df, how='outer', on=['EntityName', 'ColumnName'], suffixes=(f"_{environment_name}", f"_{baseline_name}"), indicator=True)
+        merged_df.sort_values(by=['EntityName', 'ColumnName'], ignore_index=True, inplace=True)
+        merged_output_csv = os.path.join(RESULTS_PATH, f"merged_{environment_name}_{baseline_name}.csv")
+        merged_df.to_csv(path_or_buf=merged_output_csv, index=False)
+
+        # Calculate differences dataframe
+        differences_df = merged_df.drop(merged_df[
+            (
+                (merged_df[f"ColumnType_{environment_name}"] == merged_df[f"ColumnType_{baseline_name}"])
+                |
+                (merged_df[f"ColumnType_{environment_name}"].isna() & merged_df[f"ColumnType_{baseline_name}"].isna())
+            )
+            &
+            (
+                (merged_df[f"ColumnLength_{environment_name}"] == merged_df[f"ColumnLength_{baseline_name}"])
+                |
+                (merged_df[f"ColumnLength_{environment_name}"].isna() & merged_df[f"ColumnLength_{baseline_name}"].isna())
+            )
+        ].index)
+
+        # Replace indicator labels
+        differences_df = differences_df.astype({'_merge': 'str'})
+
+        differences_df.loc[(
+            (differences_df['_merge'] == 'both')
+            &
+            (differences_df[f"ColumnType_{environment_name}"] != differences_df[f"ColumnType_{baseline_name}"])
+        ), '_merge'] = "Different Type"
+        differences_df.loc[(
+            (differences_df['_merge'] == 'both')
+            &
+            (differences_df[f"ColumnType_{environment_name}"] == differences_df[f"ColumnType_{baseline_name}"])
+        ), '_merge'] = "Different Length"
+
+        differences_df = differences_df.replace(to_replace={
+            'left_only': f"Missing in {baseline_name}",  # left is environment, so missing in baseline
+            'right_only': f"Missing in {environment_name}",  # right is baseline, so missing in environment
+            'both': r"Different Type\Length"  # Any remaining 'both' is an error?
+        })
+        differences_df.rename(columns={'_merge': 'Difference'}, inplace=True)
+
+        differences_summary = differences_df.groupby(['EntityName', 'Difference'], as_index=False)["ColumnName"].count()
+        differences_summary = differences_summary.pivot_table(index='EntityName', columns='Difference', values='ColumnName', fill_value=0)
+        differences_summary = differences_summary.astype(int)
+        differences_summary.reset_index(inplace=True)
+
+        # Generate HTML
+        differences_output_detail = os.path.join(RESULTS_PATH, f"differences_{environment_name}_{baseline_name}_detail.html")
+        differences_df.to_html(buf=differences_output_detail, na_rep='', index=False)
+
+        differences_output_summary = os.path.join(RESULTS_PATH, f"differences_{environment_name}_{baseline_name}_summary.html")
+        differences_summary.to_html(buf=differences_output_summary, na_rep='', index=False)
     return
 
 
