@@ -246,6 +246,7 @@ def compare_environments(config: dict) -> None:
         differences_summary = differences_summary.pivot_table(index='EntityName', columns='Difference', values='ColumnName', fill_value=0)
         differences_summary = differences_summary.astype(int)
         differences_summary.reset_index(inplace=True)
+        differences_summary.columns.name = None  # Needed to avoid a phantom column due to pivot_table()
 
         # Generate HTML
         differences_output_detail = os.path.join(RESULTS_PATH, f"differences_{environment_name}_{baseline_name}_detail.html")
